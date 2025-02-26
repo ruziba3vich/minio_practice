@@ -22,6 +22,7 @@ const (
 func main() {
 	r := gin.Default()
 	r.POST("/upload", uploadFile)
+	r.GET("/file/:filename", getFile)
 
 	log.Println("Server running on :8080")
 	r.Run(":8080")
@@ -43,7 +44,7 @@ func uploadFile(c *gin.Context) {
 	defer f.Close()
 
 	// Generate unique filename
-	filename := fmt.Sprintf("%d-%s", time.Now().UnixMilli(), file.Filename)
+	filename := fmt.Sprintf("%d", time.Now().UnixMilli())
 
 	// Initialize MinIO client
 	minioClient, err := minio.New(minioURL, &minio.Options{
@@ -76,9 +77,7 @@ func uploadFile(c *gin.Context) {
 		return
 	}
 
-	// Return file URL
-	fileURL := fmt.Sprintf("http://%s/%s/%s", minioURL, bucketName, filename)
-	c.JSON(http.StatusOK, gin.H{"url": fileURL})
+	c.JSON(http.StatusOK, gin.H{"url": filename})
 }
 
 func createBucket(client *minio.Client, bucket string) error {
@@ -91,4 +90,28 @@ func createBucket(client *minio.Client, bucket string) error {
 		return client.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{})
 	}
 	return nil
+}
+
+func getFile(c *gin.Context) {
+	filename := c.Param("filename")
+
+	// Initialize MinIO client
+	minioClient, err := minio.New(minioURL, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: false,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to MinIO"})
+		return
+	}
+
+	// Generate pre-signed URL
+	expiry := time.Hour * 24
+	url, err := minioClient.PresignedGetObject(context.Background(), bucketName, filename, expiry, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"url": url.String()})
 }
