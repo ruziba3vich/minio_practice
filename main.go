@@ -23,6 +23,7 @@ func main() {
 	r := gin.Default()
 	r.POST("/upload", uploadFile)
 	r.GET("/file/:filename", getFile)
+	r.DELETE("/file/:filename", deleteFile)
 
 	log.Println("Server running on :8080")
 	r.Run(":8080")
@@ -105,6 +106,13 @@ func getFile(c *gin.Context) {
 		return
 	}
 
+	// Check if the file exists
+	_, err = minioClient.StatObject(context.Background(), bucketName, filename, minio.StatObjectOptions{})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
 	// Generate pre-signed URL
 	expiry := time.Hour * 24
 	url, err := minioClient.PresignedGetObject(context.Background(), bucketName, filename, expiry, nil)
@@ -114,4 +122,34 @@ func getFile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"url": url.String()})
+}
+
+func deleteFile(c *gin.Context) {
+	filename := c.Param("filename")
+
+	// Initialize MinIO client
+	minioClient, err := minio.New(minioURL, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: false,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to connect to MinIO"})
+		return
+	}
+
+	// Check if the file exists before attempting deletion
+	_, err = minioClient.StatObject(context.Background(), bucketName, filename, minio.StatObjectOptions{})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	// Delete file from MinIO
+	err = minioClient.RemoveObject(context.Background(), bucketName, filename, minio.RemoveObjectOptions{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "File deleted successfully"})
 }
